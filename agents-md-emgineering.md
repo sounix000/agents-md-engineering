@@ -35,7 +35,7 @@ Follow the existing code style.
 It would be nice if you could add tests for new code.
 ```
 
-It reads like a helpful note from a colleague, but has subtle problems.
+Read it once and it sounds like a helpful note from a colleague. Read it against the actual repo and four things are wrong.
 
 - `zypper install` is right on SLES, and not on SLE Micro. If you don't have product-specific variants, the agent either stops with an error, or fails silently.
 
@@ -49,11 +49,11 @@ Whichever agent you run, the file is text in a prompt, not a parsed config. Clau
 
 ## How bad is it
 
-A study from ETH Zurich found that adding a context file did not generally improve task success, and raised inference cost by more than 20% on average. They tested on SWE-bench tasks and on a benchmark of repositories that already had hand-written files, and the result held across models and agents, and for the hand-written files as much as the generated ones.
+ETH Zurich found that adding a context file did not generally improve task success, and raised inference cost by more than 20% on average. They tested on SWE-bench tasks and on a benchmark of repositories that already had hand-written files, and the result held across models and agents, whether the file was hand-written or generated. Hand-written files moved success up a little — about 4% on average, for three of the four agents tested. LLM-generated files moved it down, in most of the settings tested. Call both effects noise: neither was large or consistent enough to justify the added cost. The same study's trace analysis shows how strong that compliance is: a tool got used far more often in the instances where the context file named it than in the instances where it didn't.
 
-A second study, on focused pull requests, found the opposite: 20 to 30% better on runtime and token use. It measured cost rather than correctness.
+On focused pull requests, a second study found the opposite on cost: runs with a context file finished with roughly 29% better median runtime and 17% better token use than runs without one. The two studies aren't testing the same kind of task. An open bug on SWE-bench is something an agent has never seen before; a focused pull request is usually a change the author already understands. A context file can plausibly make an agent faster at work it's already been pointed toward, without making it any better at work it has to figure out from scratch.
 
-So the upside is contested and the cost is measured. A file that earns nothing is charged for anyway, and a file with a false line in it is charged for and followed. The ETH trace analysis confirms the agents do follow the file, including when following it is the wrong move.
+Line the two up and the honest summary is narrower than either study alone: cost moves with how familiar the task already is, and neither study found a context file reliably improves whether the work actually gets done. On an unfamiliar problem, a file that earns nothing is still charged for, and a file with a false line in it is charged for and followed.
 
 ## Why it rots
 
@@ -85,11 +85,11 @@ The fixture rule belongs in the file. A pre-commit hook that rejects any edit un
 
 Instructions differ by version and by variant. 4.2 needs different guidance from 4.3. SLES and SLE Micro need different install commands, as above.
 
-If your variants map to directories, the tooling already handles it. Nested `AGENTS.md` files scope to their own subtree and the nearest one wins, the same mental model as `.gitignore`, and most agents also take imported or path-scoped rules.
+If your variants map to directories, the tooling already handles it. Nested `AGENTS.md` files scope to their own subtree, and the more specific one wins on conflict — the same mental model as `.gitignore`. More precisely, at least for Codex: it concatenates every ancestor `AGENTS.md` from the project root down to the working directory, with the nearest file placed last so it overrides on conflict. A rule in the root file still applies anywhere a more specific file doesn't override it. Claude Code and Cursor follow a similar hierarchical pattern. Most agents also take imported or path-scoped rules on top of that.
 
 They often do not map. SLES against SLE Micro is not a directory split, and neither is 4.2 against 4.3. So people copy the file and edit the copy. After a year there are four of them, three stale, and nobody can say which one the agent loaded on a given run. Git will not catch it: four divergent files are not an error.
 
-That is conditional compilation, applied to prose. Documentation toolchains took `ifdef` from the preprocessor for exactly this reason. Write one source with conditionals and generate the per-target file:
+Documentation toolchains have a name for this problem: conditional compilation, applied to prose. They took `ifdef` from the preprocessor for the same reason compilers did — one source, built per target, instead of four copies drifting apart on their own. Write one source with conditionals and generate the per-target file:
 
 ```asciidoc
 == Installing packages
@@ -122,7 +122,7 @@ The two cheap rows buy most of the value. Deleting on a schedule costs nothing a
 
 ## What to do this week
 
-1. **Find out what actually loads.** Claude Code lists the files in effect under `/context`; Codex can log its instruction chain. A file missing from that list is invisible to the model. Codex also caps instruction text at 32 KiB by default and truncates past that, silently.
+1. **Find out what actually loads.** Claude Code lists the files in effect under `/context`; Codex can log its instruction chain. A file missing from that list is invisible to the model. Codex also caps instruction text at 32 KiB by default and truncates past that, silently — the setting is `project_doc_max_bytes`. Codex logs a warning internally when it truncates, but nothing surfaces that warning in the interactive CLI, which is why it reads as silent in practice.
 2. **Diff the file against reality.** Every path, command and version number it names. Write it as a script the first time, because you will run it again. This is the pass that finds `bootstrap.sh`.
 3. **Delete.** Anything the model already does, anything contradicted elsewhere, anything you cannot date.
 4. **Add an owner and a date.** `Owner: platform team. Reviewed: 2026-08-14.` Without them nobody can tell a live rule from a dead one.
@@ -135,15 +135,15 @@ Steps 1 to 4 are an afternoon and cover most of the damage. Step 6 needs a decis
 
 **The file loads.** Check `/context` or your agent's equivalent, and check the byte count against your tool's cap.
 
-**The file is true, mechanically.** CI regenerates and fails on a diff, and the script from step 2 asserts every path, command and version still exists. That runs without anyone remembering to look.
+**The file is true, mechanically.** CI regenerates and fails on a diff, and the script from step 2 asserts every path, command and version still exists. Nobody has to remember to look.
 
-**Nothing checks the other half.** No script reads two contradictory rules and reports a conflict, and none flags an empty one. That needs a person and a calendar entry, and it is the half that gets skipped.
+**Nothing checks the other half.** No script reads *never force-push* against *force-pushing to your own feature branch is fine* and calls it a conflict, or flags *be careful* as not a rule. That still needs a person, and a calendar entry — the half that gets skipped.
 
 **The hard rules hold.** Try to violate them. Edit something under `src/gen` and confirm the hook rejects it.
 
-**Whether the file helps at all is not testable with what you have.** That is what the two studies disagree about, and answering it locally means A/B runs on tasks with known-good outcomes. The claim you can make is that the file is loaded on every run either way, and is now true rather than false.
+**Whether the file helps at all is not testable with what you have.** The two studies point in different directions depending on the task and the metric — cost went up in one, down in the other — and settling it for your own team means running A/B tests on tasks with known-good outcomes. What you can actually claim is narrower: the file loads on every run either way, and it is now true rather than false.
 
-The failure to watch for is a stale rule followed correctly. In the ETH study a tool named in a context file got used far more often than without it, because the file said so. It looks like compliance rather than error, which is why it survives review. The date on the file is what catches it.
+The failure to watch for is a stale rule followed correctly. Go back to that ETH trace analysis: a tool got used far more often when the context file named it than when it didn't, and the measurement doesn't ask whether the file was still right to name it. A stale rule gets followed just like a current one, so it looks like success too — which is why it survives review. The date on the file is what catches it.
 
 ## This came from engineering
 
@@ -160,4 +160,4 @@ Instruction files are the same problem on a smaller scale. It has to happen on a
 - Claude Code memory documentation, `code.claude.com/docs/en/memory`. Compliance and hook guidance, and `/context`.
 - OpenAI Codex AGENTS.md guide, `developers.openai.com/codex/guides/agents-md`. Instruction discovery and `project_doc_max_bytes`.
 - T. Gloaguen et al., *Evaluating AGENTS.md: Are Repository-Level Context Files Helpful for Coding Agents?*, ETH Zurich, arXiv:2602.11988.
-- *On the Impact of AGENTS.md Files on the Efficiency of AI Coding Agents*, arXiv:2601.20404.
+- J. L. Lulla et al., *On the Impact of AGENTS.md Files on the Efficiency of AI Coding Agents*, arXiv:2601.20404.
